@@ -118,8 +118,8 @@ def preprocess_df(df: pd.DataFrame) -> pd.DataFrame:
                 out[c] = maybe
     return out
 
-def derive_stints(df: pd.DataFrame, lap_time_col: str, threshold: float = 300.0) -> pd.DataFrame:
-    if "Stint" in df.columns:
+def derive_stints(df: pd.DataFrame, lap_time_col: str, threshold: float = 120.0) -> pd.DataFrame:
+    if "Out" in df.columns:
         return df
     stn, stints = 1, []
     for t in df[lap_time_col].fillna(threshold + 1):
@@ -127,7 +127,7 @@ def derive_stints(df: pd.DataFrame, lap_time_col: str, threshold: float = 300.0)
         if t > threshold:
             stn += 1
     out = df.copy()
-    out["Stint"] = stints
+    out["Out"] = Out
     return out
 
 # 🔧 ATUALIZADA: agora aceita filtro por 'treinos' (lista com valores da coluna "Treino")
