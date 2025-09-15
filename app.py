@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.lines import Line2D
 
-st.set_page_config(page_title="📊 Endurance Stats — OUT/Treino (.xlsx)", layout="wide")
+st.set_page_config(page_title="📊 Endurance Stats — OUT/Treino", layout="wide")
 
 # ==================== Helpers de legenda ====================
 def add_session_legend(ax, handles, position="right", title="Sessões", fontsize="x-small"):
@@ -217,7 +217,7 @@ def annotate_box(ax, bp, ys_list, idx, color, fs, dy):
 
 # ==================== App ====================
 def main():
-    st.title("📊 Análise Estatística Endurance — OUT por >120s + filtro por Treino (coluna 'I')")
+    st.title("📊 Análise Estatística Endurance — Treinos")
 
     uploaded = st.file_uploader("Faça upload do arquivo Excel (.xlsx)", type=["xlsx"])
     if not uploaded:
