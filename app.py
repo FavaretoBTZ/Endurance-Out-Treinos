@@ -698,7 +698,7 @@ def main():
             if s in sess_order and s not in present_sessions_order:
                 present_sessions_order.append(s)
 
-        sess2color = {s: base_colors[i % len(base_colors)] for i, s in enumerate(present_sessions_order)]
+        sess2color = {s: base_colors[i % len(base_colors)] for i, s in enumerate(present_sessions_order)}
         handles_local = [mpatches.Patch(facecolor=sess2color[s], edgecolor=sess2color[s], label=s)
                          for s in present_sessions_order]
         return ys, lbls, sess_order, sess2color, handles_local
