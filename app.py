@@ -1,6 +1,6 @@
-\
+
 import math
-from typing import Optional
+from typing import Optional, Iterable, Union, List, Dict
 import re
 
 import pandas as pd
@@ -14,26 +14,21 @@ st.set_page_config(page_title="📊 Análise Estatística Endurance (Outs)", lay
 
 # ==================== Helpers de legenda ====================
 def add_session_legend(ax, handles, position="right", title="Sessões", fontsize="x-small"):
-    """Coloca a legenda em: 'right' (fora), 'top' (acima, em linha) ou 'hide'."""
     if position == "right":
-        return ax.legend(
-            handles=handles, loc="upper left", bbox_to_anchor=(1.02, 1.0),
-            borderaxespad=0.0, fontsize=fontsize, title=title, frameon=True
-        )
+        return ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(1.02, 1.0),
+                         borderaxespad=0.0, fontsize=fontsize, title=title, frameon=True)
     elif position == "top":
         ncol = max(1, min(len(handles), 4))
-        return ax.legend(
-            handles=handles, loc="lower left", bbox_to_anchor=(0.0, 1.02, 1.0, 0.2),
-            mode="expand", borderaxespad=0.0, ncol=ncol, fontsize=fontsize,
-            title=title, frameon=True
-        )
+        return ax.legend(handles=handles, loc="lower left",
+                         bbox_to_anchor=(0.0, 1.02, 1.0, 0.2),
+                         mode="expand", borderaxespad=0.0, ncol=ncol,
+                         fontsize=fontsize, title=title, frameon=True)
     elif position == "hide":
         return None
     else:
         return ax.legend(handles=handles, loc="upper right", fontsize=fontsize, title=title)
 
 def apply_layout_for_legend(fig, position: str):
-    """Reserva margem para a legenda conforme posição."""
     if position == "right":
         fig.tight_layout(rect=[0.0, 0.0, 0.82, 1.0])
     elif position == "top":
@@ -43,7 +38,6 @@ def apply_layout_for_legend(fig, position: str):
 
 # ==================== Utils ====================
 def time_to_seconds(t):
-    """Converte 'M:SS.mmm' ou string numérica para segundos; retorna NaN se não parsear."""
     try:
         ts = str(t).replace(',', '.').strip()
         if ts == "" or ts.lower() in {"nan", "none"}:
@@ -56,7 +50,6 @@ def time_to_seconds(t):
         return pd.NA
 
 def coerce_numeric(series: pd.Series) -> pd.Series:
-    """Converte strings com ,/. e milhar em float de modo tolerante."""
     def smart_to_float(x):
         s = str(x).strip()
         if s == "" or s.lower() in {"nan", "none"}:
@@ -119,7 +112,6 @@ def preprocess_df(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 def derive_outs(df: pd.DataFrame, lap_time_col: str = "Lap Tm", threshold: float = 120.0) -> pd.DataFrame:
-    """Cria a coluna 'Out' (1,2,3,...) e muda o Out quando Lap Tm > threshold (padrão 120s)."""
     if "Out" in df.columns:
         return df
     out_num = 1
@@ -136,18 +128,26 @@ def derive_outs(df: pd.DataFrame, lap_time_col: str = "Lap Tm", threshold: float
     new_df["Out"] = outs
     return new_df
 
-def get_filtered(df: pd.DataFrame, out_choice, min_lap_seconds, max_lap_seconds,
-                 is_time_metric: bool, treinos=None) -> pd.DataFrame:
+def get_filtered(df: pd.DataFrame,
+                 out_choice: Union[str, int, Iterable[int]],
+                 min_lap_seconds: float, max_lap_seconds: float,
+                 is_time_metric: bool, treinos: Optional[List[str]] = None) -> pd.DataFrame:
     d = df.copy()
     if treinos and "Treino" in d.columns:
-        treinos_norm = [str(t) for t in treinos]
-        d = d[d["Treino"].astype(str).isin(treinos_norm)]
-    if out_choice != "All" and "Out" in d.columns:
-        d = d[d["Out"] == out_choice]
+        tr_norm = [str(t) for t in treinos]
+        d = d[d["Treino"].astype(str).isin(tr_norm)]
+    if "Out" in d.columns:
+        if isinstance(out_choice, str) and out_choice == "All":
+            pass
+        else:
+            if isinstance(out_choice, Iterable) and not isinstance(out_choice, (str, bytes)):
+                outs_set = set(int(x) for x in out_choice)
+                d = d[d["Out"].isin(outs_set)]
+            else:
+                d = d[d["Out"] == int(out_choice)]
     if is_time_metric and "Lap Tm" in d.columns:
         d = d[pd.to_numeric(d["Lap Tm"], errors="coerce").notna()]
-        d = d[d["Lap Tm"] >= float(min_lap_seconds)]
-        d = d[d["Lap Tm"] <= float(max_lap_seconds)]
+        d = d[d["Lap Tm"].between(float(min_lap_seconds), float(max_lap_seconds), inclusive="both")]
     return d
 
 def parse_float_any(s: str) -> Optional[float]:
@@ -177,7 +177,6 @@ def float_input(label: str, default: float, min_value: float = 0.0, max_value: f
     return float(val)
 
 def annotate_box(ax, bp, ys_list, idx, color, fs, dy):
-    """Anota mediana, Q1/Q3 + Máximo/Mínimo em cada box."""
     data_i = np.array(ys_list[idx], dtype=float)
     q1 = float(np.percentile(data_i, 25))
     q3 = float(np.percentile(data_i, 75))
@@ -217,7 +216,6 @@ def main():
 
     sheets = load_excel(uploaded)
 
-    # (Opcional) remover a última aba
     remove_last_sheet = st.checkbox("Remover última aba da planilha", value=True)
     if remove_last_sheet and len(sheets) >= 1:
         last_key = list(sheets.keys())[-1]
@@ -232,7 +230,6 @@ def main():
             if ltcol != "Lap Tm":
                 df.rename(columns={ltcol: "Lap Tm"}, inplace=True)
             df["Lap Tm"] = df["Lap Tm"].apply(time_to_seconds)
-            # Derivar OUTs com threshold=120s
             df = derive_outs(df, lap_time_col="Lap Tm", threshold=120.0)
         else:
             df["Lap Tm"] = pd.NA
@@ -255,8 +252,8 @@ def main():
         st.warning("Selecione ao menos uma aba (ex.: ‘- P1’).")
         return
 
-    # Seletor de Treino POR sessão (coluna 'Treino' = coluna I)
-    session_treinos = {}
+    # Treinos por sessão
+    session_treinos: Dict[str, List[str]] = {}
     st.markdown("**Selecione o(s) Treino(s) (coluna 'I' / 'Treino') por sessão:**")
     for s in sessions:
         df_s = sheets[s]
@@ -271,15 +268,18 @@ def main():
             key=f"treinos_{s}"
         )
 
-    # Seletor de Out por sessão
-    session_out = {}
+    # OUT(s) por sessão
+    session_outs: Dict[str, List[int]] = {}
     for s in sessions:
-        opts = sorted(pd.Series(sheets[s]["Out"]).dropna().unique()) if "Out" in sheets[s].columns else []
-        session_out[s] = st.selectbox(
-            f"Out para '{s}'",
-            options=["All"] + list(opts),
-            format_func=lambda x: "All" if x == "All" else f"Out {int(x)}",
-            key=f"out_{s}"
+        if "Out" in sheets[s].columns:
+            outs = sorted(pd.Series(sheets[s]["Out"]).dropna().astype(int).unique().tolist())
+        else:
+            outs = []
+        session_outs[s] = st.multiselect(
+            f"OUT(s) — {s}",
+            options=outs,
+            default=outs,  # todos por padrão
+            key=f"outs_{s}"
         )
 
     chart_type = st.selectbox("Tipo de gráfico", ["Boxplot", "Linha", "Dispersão"])
@@ -309,58 +309,63 @@ def main():
         st.warning("O máximo não pode ser menor que o mínimo. Ajustei o máximo para o mínimo.")
         max_lap = float(min_lap)
 
-    # Sliders por sessão
-    session_sample, filtered_exports = {}, {}
-    for s in sessions:
-        df_f = get_filtered(sheets[s], session_out[s], min_lap, max_lap, is_time_metric, treinos=session_treinos.get(s))
-        avail = int(len(df_f))
-        key = f"sample_{s}"
-        if avail <= 0:
-            session_sample[s] = 0
-            st.text(f"Amostragem em '{s}': 0 (sem dados após filtros)")
-        elif avail == 1:
-            session_sample[s] = 1
-            st.text(f"Amostragem em '{s}': 1 (apenas 1 volta)")
-        else:
-            min_v, max_v = 1, avail
-            cur = st.session_state.get(key, min(30, max_v))
-            try:
-                cur = int(cur)
-            except:
-                cur = min(30, max_v)
-            cur = max(min_v, min(max_v, cur))
-            session_sample[s] = st.slider(
-                f"Amostragem (voltas mais rápidas) em '{s}'",
-                min_value=min_v, max_value=max_v, value=cur, step=1, key=key
-            )
-
-    # Séries para gráfico principal
+    # ---------------- Gráfico principal ----------------
     series_x, series_y, labels = [], [], []
-    for s in sessions:
-        df_f = get_filtered(sheets[s], session_out[s], min_lap, max_lap, is_time_metric, treinos=session_treinos.get(s))
-        if metric not in df_f.columns:
-            st.warning(f"'{metric}' não encontrado em {s}. Pulando.")
-            continue
-        n_take = int(session_sample[s])
-        if n_take <= 0 or len(df_f) == 0:
-            df_sel = df_f.head(0)
-        else:
-            n_take = min(n_take, len(df_f))
-            df_sel = df_f.nsmallest(n_take, metric)
-        filtered_exports[s] = df_sel.copy()
-        lap_col = find_lap_column(df_sel) if not df_sel.empty else "Lap"
-        if x_axis_mode == "Lap" and not df_sel.empty:
-            df_sel = df_sel.sort_values(lap_col)
-            x = df_sel[lap_col].tolist()
-            y = pd.to_numeric(df_sel[metric], errors="coerce").tolist()
-        else:
-            df_sel = df_sel.sort_values(metric)
-            x = list(range(1, len(df_sel) + 1))
-            y = pd.to_numeric(df_sel[metric], errors="coerce").tolist()
-        series_x.append(x); series_y.append(y)
-        labels.append(f"{s} ({'All' if session_out[s]=='All' else 'Out '+str(session_out[s])})")
+    filtered_exports = {}
+    outs_sem_dados = []
 
-    # Gráfico principal
+    for s in sessions:
+        outs_chosen = session_outs.get(s) or "All"
+        df_f = get_filtered(sheets[s], outs_chosen, min_lap, max_lap, is_time_metric, treinos=session_treinos.get(s))
+
+        if metric not in df_f.columns or df_f.empty:
+            # Se ficar vazio, marcar todos OUTs selecionados como sem dados
+            if isinstance(outs_chosen, list):
+                for o in outs_chosen:
+                    outs_sem_dados.append(f"{s} — Out {o}")
+            elif outs_chosen != "All":
+                outs_sem_dados.append(f"{s} — Out {outs_chosen}")
+            continue
+
+        if isinstance(outs_chosen, list) and len(outs_chosen) > 1:
+            for out_n in outs_chosen:
+                df_o = df_f[df_f["Out"] == out_n]
+                if df_o.empty:
+                    outs_sem_dados.append(f"{s} — Out {out_n}")
+                    continue
+                lap_col = find_lap_column(df_o)
+                if x_axis_mode == "Lap":
+                    df_plot = df_o.sort_values(lap_col)
+                    x = df_plot[lap_col].tolist()
+                    y = pd.to_numeric(df_plot[metric], errors="coerce").tolist()
+                else:
+                    df_plot = df_o.sort_values(metric)
+                    x = list(range(1, len(df_plot) + 1))
+                    y = pd.to_numeric(df_plot[metric], errors="coerce").tolist()
+                series_x.append(x); series_y.append(y)
+                labels.append(f"{s} — Out {int(out_n)}")
+        else:
+            lap_col = find_lap_column(df_f)
+            if x_axis_mode == "Lap":
+                df_plot = df_f.sort_values(lap_col)
+                x = df_plot[lap_col].tolist()
+                y = pd.to_numeric(df_plot[metric], errors="coerce").tolist()
+            else:
+                df_plot = df_f.sort_values(metric)
+                x = list(range(1, len(df_plot) + 1))
+                y = pd.to_numeric(df_plot[metric], errors="coerce").tolist()
+            series_x.append(x); series_y.append(y)
+            if outs_chosen == "All" or outs_chosen == []:
+                labels.append(f"{s} — Out(s): Todos")
+            else:
+                only = outs_chosen[0] if isinstance(outs_chosen, list) else outs_chosen
+                labels.append(f"{s} — Out {int(only)}")
+
+        filtered_exports[s] = df_f.copy()
+
+    if outs_sem_dados:
+        st.info("Sem dados após filtros para: " + "; ".join(outs_sem_dados))
+
     fig, ax = plt.subplots(figsize=(10, 4))
     if chart_type == "Boxplot":
         valid_pairs = [(ys, lbl) for ys, lbl in zip(series_y, labels) if len(ys) > 0]
@@ -368,9 +373,9 @@ def main():
             st.warning("Sem dados para plotar.")
             return
         ys_list, lbls = zip(*valid_pairs)
+        bp = ax.boxplot(ys_list, patch_artist=True)
         cycle = plt.rcParams.get("axes.prop_cycle", None)
         base_colors = cycle.by_key().get("color", ["C0"]) if cycle else ["C0"]
-        bp = ax.boxplot(ys_list, patch_artist=True)
         n_boxes = len(lbls); h_in = fig.get_size_inches()[1]
         fs = max(6, min(12, (10 * (h_in / 4.0)) * (8 / max(6, n_boxes))))
         all_vals = np.concatenate([np.array(v, dtype=float) for v in ys_list])
@@ -389,19 +394,24 @@ def main():
         ax.set_xticks([])
     elif chart_type == "Linha":
         for x, y, lbl in zip(series_x, series_y, labels):
-            if len(x) and len(y): ax.plot(x, y, label=lbl)
+            if len(x) and len(y):
+                ax.plot(x, y, label=lbl)
         ax.legend(loc="upper right", fontsize="xx-small")
+        ax.set_xlabel("Lap" if x_axis_mode == "Lap" else "Amostra")
+        ax.set_ylabel(ylabel)
     else:
         for x, y, lbl in zip(series_x, series_y, labels):
-            if len(x) and len(y): ax.scatter(x, y, s=10, label=lbl)
+            if len(x) and len(y):
+                ax.scatter(x, y, s=10, label=lbl)
         ax.legend(loc="upper right", fontsize="xx-small")
-    ax.set_xlabel("Lap" if x_axis_mode == "Lap" else "Amostra")
-    ax.set_ylabel(ylabel)
+        ax.set_xlabel("Lap" if x_axis_mode == "Lap" else "Amostra")
+        ax.set_ylabel(ylabel)
+
     fig.tight_layout()
     st.pyplot(fig, use_container_width=True)
     plt.close(fig)
 
-    # Estatísticas descritivas por amostragem
+    # Estatísticas
     st.header("📊 Estatísticas Descritivas por Amostragem")
     stats_frames = []
     for lbl, y in zip(labels, series_y):
@@ -413,7 +423,7 @@ def main():
     else:
         st.info("Sem dados suficientes para estatísticas descritivas.")
 
-    # Downloads por sessão
+    # Downloads
     st.subheader("⬇️ Baixar dados filtrados (por sessão)")
     for s in sessions:
         if s in filtered_exports and not filtered_exports[s].empty:
@@ -425,59 +435,9 @@ def main():
                 key=f"dl_{s}"
             )
 
-    # Métricas avançadas por Out (P1)
-    st.header(f"📋 Métricas Avançadas por Out (Somente P1, Lap Tm entre {float(min_lap):.1f}s e {max_lap:.1f}s)")
-    p1 = [s for s in sheets if s.strip().endswith("P1")]
-    rows = []
-    for sess in p1:
-        df_s = sheets[sess]
-        if "Lap Tm" not in df_s.columns:
-            continue
-        df_s_local = df_s[pd.to_numeric(df_s["Lap Tm"], errors="coerce").notna()]
-        df_s_local = df_s_local[df_s_local["Lap Tm"] >= float(min_lap)]
-        for out_n in sorted(pd.Series(df_s_local["Out"]).dropna().unique()):
-            cond = (df_s_local["Out"] == out_n) & df_s_local["Lap Tm"].between(float(min_lap), float(max_lap), inclusive="both")
-            df_grp = df_s_local[cond]
-            if df_grp.empty:
-                continue
-            I   = df_grp.nsmallest(10, "Lap Tm")["Lap Tm"].mean()
-            II  = df_grp["Lap Tm"].min()
-            vel = df_grp["SSTRAP"].max() if "SSTRAP" in df_grp.columns else pd.NA
-            n   = len(df_grp)
-            n30 = max(math.ceil(n * 0.3), 1)
-            chronological = df_grp.reset_index(drop=True)
-            IV  = chronological.iloc[:n30]["Lap Tm"].mean()
-            V   = chronological.iloc[-n30:]["Lap Tm"].mean()
-            VI  = pd.Series([IV, V]).mean()
-            times_sorted = df_grp["Lap Tm"].sort_values().reset_index(drop=True)
-            n2 = len(times_sorted); k = int(n2 * 0.2)
-            gauss = times_sorted.iloc[k:n2-k].mean() if n2 > 2*k else pd.NA
-            GPI = (I*4 + VI*2 + gauss*2 + II*2) / 10 if all(pd.notna(x) for x in [I, II, VI, gauss]) else pd.NA
-            rows.append({
-                "Sessão":              sess,
-                "Out":                 int(out_n) if pd.notna(out_n) else out_n,
-                "MédiaTop10":          round(I, 3)    if pd.notna(I)    else pd.NA,
-                "MinLap":              round(II, 3)   if pd.notna(II)   else pd.NA,
-                "Velocidade Máxima":   round(vel, 3)  if pd.notna(vel)  else pd.NA,
-                "MédiaIni30%":         round(IV, 3)   if pd.notna(IV)   else pd.NA,
-                "MédiaFim30%":         round(V, 3)    if pd.notna(V)    else pd.NA,
-                "MédiaIV_V":           round(VI, 3)   if pd.notna(VI)   else pd.NA,
-                "Gauss (20% trimmed)": round(gauss, 3) if pd.notna(gauss) else pd.NA,
-                "GPI":                 round(GPI, 3)  if pd.notna(GPI)  else pd.NA
-            })
-
-    dfm = pd.DataFrame(rows)
-    if dfm.empty:
-        st.warning("Nenhuma métrica avançada calculada.")
-    else:
-        st.dataframe(dfm, use_container_width=True)
-        csv = dfm.to_csv(index=False).encode("utf-8")
-        st.download_button("⬇️ Baixar métricas (CSV)", csv, "metricas_avancadas_P1_por_Out.csv", "text/csv")
-
-    # ==================== Boxplot Independente ====================
+    # ==================== Boxplot Independente (restaurado) ====================
     st.subheader("📦 Boxplot — Seletor independente (por sessão/Out)")
 
-    # seletor de posição da legenda
     legend_pos = st.selectbox(
         "Posição da legenda (sessões)",
         ["Fora à direita", "Acima (em linha)", "Ocultar"],
@@ -488,9 +448,9 @@ def main():
 
     all_session_names = list(sheets.keys())
     sel_sessions2 = st.multiselect(
-        "Selecione sessões para análise (Boxplot)",
+        "Selecione sessões para análise (Boxplot independ.)",
         options=all_session_names,
-        default=default_p1[:2] if default_p1 else all_session_names[:2],
+        default=sessions if sessions else (default_p1[:2] if default_p1 else all_session_names[:2]),
         key="sessions_box2"
     )
     if not sel_sessions2:
@@ -509,7 +469,7 @@ def main():
     labels_map2 = {c: c for c in metric_opts2}
     if "SSTRAP" in labels_map2:
         labels_map2["SSTRAP"] = "Velocidade Máxima (SSTRAP)"
-    metric2 = st.selectbox("Selecione métrica (Boxplot)", options=metric_opts2,
+    metric2 = st.selectbox("Selecione métrica (Boxplot independ.)", options=metric_opts2,
                            format_func=lambda x: labels_map2[x], key="metric_box2")
 
     min_lap2 = float_input("Excluir voltas com 'Lap Tm' abaixo de (s) (valor mínimo)", default=min_lap, key="minlap_box2")
@@ -518,57 +478,24 @@ def main():
         st.warning("No Boxplot, o máximo não pode ser menor que o mínimo. Ajustei para o mínimo.")
         max_lap2 = float(min_lap2)
 
-    # seleção de Outs por sessão
+    # OUTs por sessão para a seção independente
     sel_outs_per_session = {}
     with st.container():
-        st.markdown("**Selecione Out(s) (Boxplot) por sessão:**")
+        st.markdown("**Selecione Out(s) (Boxplot independ.) por sessão:**")
         for idx, s in enumerate(sel_sessions2):
             df_s = sheets[s]
             outs_s = sorted(pd.Series(df_s["Out"]).dropna().unique()) if "Out" in df_s.columns else []
-            sel = st.multiselect(f"{s} — Out(s)", options=outs_s, default=outs_s, key=f"outs_box2_{idx}")
+            default_outs = session_outs.get(s, outs_s)
+            sel = st.multiselect(f"{s} — Out(s)", options=outs_s, default=default_outs, key=f"outs_box2_{idx}")
             sel_outs_per_session[s] = sel if sel else outs_s
 
-    # limite do slider de amostragem
-    max_avail2 = 0
-    for s in sel_sessions2:
-        df_s = sheets[s].copy()
-        if "Lap Tm" in df_s.columns:
-            df_s = df_s[pd.to_numeric(df_s["Lap Tm"], errors="coerce").notna()]
-            df_s = df_s[df_s["Lap Tm"] >= float(min_lap2)]
-            df_s = df_s[df_s["Lap Tm"] <= float(max_lap2)]
-        outs_to_use = sel_outs_per_session.get(s, [])
-        if not outs_to_use and "Out" in df_s.columns:
-            outs_to_use = sorted(pd.Series(df_s["Out"]).dropna().unique())
-        for out_n in outs_to_use if outs_to_use else [None]:
-            avail = len(df_s if (out_n is None or "Out" not in df_s.columns) else df_s[df_s["Out"] == out_n])
-            max_avail2 = max(max_avail2, int(avail))
-
-    if max_avail2 <= 0:
-        sample2 = 0
-        st.text("Amostragem (Boxplot): 0 (sem dados após filtros)")
-    elif max_avail2 == 1:
-        sample2 = 1
-        st.text("Amostragem (Boxplot): 1 (apenas 1 volta)")
-    else:
-        key_box = "sample_box2"
-        min_v2, max_v2 = 1, max_avail2
-        cur2 = st.session_state.get(key_box, min(30, max_v2))
-        try:
-            cur2 = int(cur2)
-        except:
-            cur2 = min(30, max_v2)
-        cur2 = max(min_v2, min(max_v2, cur2))
-        sample2 = st.slider("Amostragem (voltas mais rápidas) (Boxplot)",
-                            min_value=min_v2, max_value=max_v2, value=cur2, step=1, key=key_box)
-
-    # montar grupos para o boxplot
+    # montar grupos
     ys_list2, lbls2, box_sessions2 = [], [], []
     for s in sel_sessions2:
         df_s = sheets[s].copy()
         if "Lap Tm" in df_s.columns:
             df_s = df_s[pd.to_numeric(df_s["Lap Tm"], errors="coerce").notna()]
-            df_s = df_s[df_s["Lap Tm"] >= float(min_lap2)]
-            df_s = df_s[df_s["Lap Tm"] <= float(max_lap2)]
+            df_s = df_s[df_s["Lap Tm"].between(float(min_lap2), float(max_lap2), inclusive="both")]
         if metric2 not in df_s.columns:
             st.warning(f"Métrica '{metric2}' não encontrada em {s}. Pulando.")
             continue
@@ -577,30 +504,20 @@ def main():
         if not outs_to_use and "Out" in df_s.columns:
             outs_to_use = sorted(pd.Series(df_s["Out"]).dropna().unique())
 
-        def take_smallest(df_g, n):
-            if n <= 0 or len(df_g) == 0:
-                return df_g.head(0)
-            return df_g.nsmallest(min(int(n), len(df_g)), metric2)
+        def take_values(df_g):
+            return pd.to_numeric(df_g[metric2], errors="coerce").dropna().tolist()
 
         if "Out" not in df_s.columns or not outs_to_use:
-            df_sel = take_smallest(df_s, sample2)
-            y = pd.to_numeric(df_sel[metric2], errors="coerce").dropna().tolist()
+            y = take_values(df_s)
             if y:
-                ys_list2.append(y)
-                lbls2.append(f"{s}")
-                box_sessions2.append(s)
+                ys_list2.append(y); lbls2.append(f"{s}"); box_sessions2.append(s)
         else:
             for out_n in outs_to_use:
                 df_g = df_s[df_s["Out"] == out_n]
-                if df_g.empty:
-                    continue
-                df_sel = take_smallest(df_g, sample2)
-                y = pd.to_numeric(df_sel[metric2], errors="coerce").dropna().tolist()
+                y = take_values(df_g)
                 if not y:
                     continue
-                ys_list2.append(y)
-                lbls2.append(f"{s} — Out {int(out_n)}")
-                box_sessions2.append(s)
+                ys_list2.append(y); lbls2.append(f"{s} — Out {int(out_n)}"); box_sessions2.append(s)
 
     st.divider()
     st.markdown("#### 📊 Boxplot (Independente por sessão/Out)")
@@ -650,72 +567,7 @@ def main():
     # ==================== GRÁFICO DE PONTOS — APENAS MÉDIA ====================
     st.subheader("📈 Média por grupo (mesma ordem do Boxplot) — cores por sessão")
 
-    def _rebuild_groups_for_points():
-        ys, lbls, sess_order = [], [], []
-        for s in sel_sessions2:
-            df_s = sheets[s].copy()
-
-            if "Lap Tm" in df_s.columns:
-                df_s = df_s[pd.to_numeric(df_s["Lap Tm"], errors="coerce").notna()]
-                df_s = df_s[df_s["Lap Tm"].between(float(min_lap2), float(max_lap2), inclusive="both")]
-
-            if metric2 not in df_s.columns:
-                continue
-
-            outs_to_use = sel_outs_per_session.get(s, [])
-            if not outs_to_use and "Out" in df_s.columns:
-                outs_to_use = sorted(pd.Series(df_s["Out"]).dropna().unique())
-
-            def take_smallest(df_g, n):
-                if n <= 0 or len(df_g) == 0:
-                    return df_g.head(0)
-                return df_g.nsmallest(min(int(n), len(df_g)), metric2)
-
-            if "Out" not in df_s.columns or not outs_to_use:
-                df_sel = take_smallest(df_s, sample2)
-                y = pd.to_numeric(df_sel[metric2], errors="coerce").dropna().tolist()
-                if y:
-                    ys.append(y); lbls.append(f"{s}"); sess_order.append(s)
-            else:
-                for out_n in outs_to_use:
-                    df_g = df_s[df_s["Out"] == out_n]
-                    if df_g.empty:
-                        continue
-                    df_sel = take_smallest(df_g, sample2)
-                    y = pd.to_numeric(df_sel[metric2], errors="coerce").dropna().tolist()
-                    if not y:
-                        continue
-                    ys.append(y); lbls.append(f"{s} — Out {int(out_n)}"); sess_order.append(s)
-
-        cycle = plt.rcParams.get("axes.prop_cycle", None)
-        base_colors = cycle.by_key().get("color", ["C0"]) if cycle else ["C0"]
-
-        present_sessions_order = []
-        for s in sel_sessions2:
-            if s in sess_order and s not in present_sessions_order:
-                present_sessions_order.append(s)
-
-        sess2color = {s: base_colors[i % len(base_colors)] for i, s in enumerate(present_sessions_order)}
-        handles_local = [mpatches.Patch(facecolor=sess2color[s], edgecolor=sess2color[s], label=s)
-                         for s in present_sessions_order]
-        return ys, lbls, sess_order, sess2color, handles_local
-
-    need_rebuild = any(name not in locals() for name in ["ys_list2", "lbls2", "box_sessions2"])
-    if need_rebuild:
-        ys_list2, lbls2, box_sessions2, session_to_color, handles2 = _rebuild_groups_for_points()
-    else:
-        session_to_color = {s: plt.rcParams.get("axes.prop_cycle").by_key().get("color", ["C0"])[i % len(plt.rcParams.get("axes.prop_cycle").by_key().get("color", ["C0"]))] for i, s in enumerate(set(box_sessions2))}
-
-    if not ys_list2:
-        st.info("Sem dados para o gráfico de médias com os filtros atuais.")
-        return
-
-    # calcula somente as médias por grupo
-    means = []
-    for y in ys_list2:
-        s = pd.Series(pd.to_numeric(y, errors="coerce")).dropna()
-        means.append(float(s.mean()) if not s.empty else np.nan)
-
+    means = [float(pd.Series(pd.to_numeric(v, errors="coerce")).dropna().mean()) if len(v) else np.nan for v in ys_list2]
     x = np.arange(1, len(lbls2) + 1, dtype=float)
     fig3, ax3 = plt.subplots(figsize=(10, 4))
 
@@ -727,12 +579,10 @@ def main():
         col = session_to_color.get(sess, "C0")
         if not np.isnan(means[i]):
             ax3.scatter([x[i]], [means[i]], marker="o", s=60, color=col, zorder=3)
-            ax3.text(
-                x[i], means[i] + dy, f"{means[i]:.3f}",
-                ha="center", va="bottom", fontsize=8, color="black",
-                bbox=dict(boxstyle="round,pad=0.12", facecolor="white", alpha=0.6, linewidth=0),
-                clip_on=True, zorder=4
-            )
+            ax3.text(x[i], means[i] + dy, f"{means[i]:.3f}", ha="center", va="bottom",
+                     fontsize=8, color="black",
+                     bbox=dict(boxstyle="round,pad=0.12", facecolor="white", alpha=0.6, linewidth=0),
+                     clip_on=True, zorder=4)
 
     _ = add_session_legend(ax3, handles=handles2, position=legend_choice, title="Sessões", fontsize="x-small")
 
